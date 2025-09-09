@@ -1,0 +1,17 @@
+[application]
+name = "rainbow-blog-front"
+default_platform = "web"
+
+[web.app]
+title = "Rainbow Blog - 分享你的故事"
+
+[web.watcher]
+watch_path = ["src"]
+
+[web.dev-server]
+port = 5173
+host = "0.0.0.0"
+hot_reload = true
+
+[[web.proxy]]
+backend = "http://127.0.0.1:8000/api/"
