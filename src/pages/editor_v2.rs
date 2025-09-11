@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use dioxus_router::prelude::*;
 use crate::{
-    api::{articles::ArticleService, versions::VersionService},
+    api::{articles::ArticleService, versions::VersionService, client::API_BASE_URL},
     models::{
         article::{Article, CreateArticleRequest, UpdateArticleRequest},
         version::{ArticleVersion, CreateVersionRequest},
@@ -41,7 +41,7 @@ pub fn EditorV2Page(slug: Option<String>) -> Element {
                         title.set(art.title.clone());
                         subtitle.set(art.subtitle.clone().unwrap_or_default());
                         content.set(art.content.clone());
-                        excerpt.set(art.excerpt.clone());
+                        excerpt.set(art.excerpt.clone().unwrap_or_default());
                         cover_image_url.set(art.cover_image_url.clone().unwrap_or_default());
                         
                         // 设置标签
@@ -60,22 +60,49 @@ pub fn EditorV2Page(slug: Option<String>) -> Element {
     
     // 保存草稿
     let save_draft = move || {
-        if let Some(art) = article() {
-            let request = UpdateArticleRequest {
-                title: Some(title()),
-                subtitle: Some(subtitle()),
-                content: Some(content()),
-                excerpt: Some(excerpt()),
-                cover_image_url: Some(cover_image_url()),
-                tags: Some(tags_input().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()),
-                is_paid_content: None,
-                series_id: None,
-                publication_id: None,
-                series_order: None,
-            };
+        spawn(async move {
+            is_saving.set(true);
+            error.set(None);
             
-            spawn(async move {
-                is_saving.set(true);
+            let tags: Vec<String> = tags_input()
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            
+            if let Some(art) = article() {
+                // 更新现有文章
+                // 处理封面图URL，如果是相对路径则转换为完整URL
+                let processed_cover_image_url = if cover_image_url().is_empty() {
+                    None
+                } else {
+                    let url = cover_image_url();
+                    if url.starts_with("/api/") {
+                        // API相对路径，需要添加后端域名
+                        let api_origin = API_BASE_URL.trim_end_matches("/api");
+                        Some(format!("{}{}", api_origin, url))
+                    } else if url.starts_with("http://") || url.starts_with("https://") {
+                        // 已经是完整URL
+                        Some(url)
+                    } else {
+                        // 其他格式，尝试作为完整URL
+                        Some(url)
+                    }
+                };
+                
+                let request = UpdateArticleRequest {
+                    title: Some(title()),
+                    subtitle: if subtitle().is_empty() { None } else { Some(subtitle()) },
+                    content: Some(content()),
+                    excerpt: if excerpt().is_empty() { None } else { Some(excerpt()) },
+                    cover_image_url: processed_cover_image_url,
+                    tags: Some(tags),
+                    is_paid_content: None,
+                    series_id: None,
+                    publication_id: None,
+                    series_order: None,
+                };
+                
                 match ArticleService::update_article(&art.id, &request).await {
                     Ok(_) => {
                         last_saved.set(Some("已保存".to_string()));
@@ -96,9 +123,61 @@ pub fn EditorV2Page(slug: Option<String>) -> Element {
                         error.set(Some(format!("保存失败: {}", e.message)));
                     }
                 }
-                is_saving.set(false);
-            });
-        }
+            } else {
+                // 创建新文章
+                // 处理封面图URL，如果是相对路径则转换为完整URL
+                let processed_cover_image_url = if cover_image_url().is_empty() {
+                    None
+                } else {
+                    let url = cover_image_url();
+                    if url.starts_with("/api/") {
+                        // API相对路径，需要添加后端域名
+                        let api_origin = API_BASE_URL.trim_end_matches("/api");
+                        Some(format!("{}{}", api_origin, url))
+                    } else if url.starts_with("http://") || url.starts_with("https://") {
+                        // 已经是完整URL
+                        Some(url)
+                    } else {
+                        // 其他格式，尝试作为完整URL
+                        Some(url)
+                    }
+                };
+                
+                let request = CreateArticleRequest {
+                    title: title(),
+                    subtitle: if subtitle().is_empty() { None } else { Some(subtitle()) },
+                    content: content(),
+                    excerpt: if excerpt().is_empty() { None } else { Some(excerpt()) },
+                    cover_image_url: processed_cover_image_url,
+                    publication_id: None,
+                    series_id: None,
+                    series_order: None,
+                    is_paid_content: false,
+                    tags,
+                    save_as_draft: true,  // 这个参数已经不再使用，保留是为了兼容性
+                    seo_title: None,
+                    seo_description: None,
+                    seo_keywords: None,
+                };
+                
+                match ArticleService::create_article(&request).await {
+                    Ok(created_article) => {
+                        article.set(Some(created_article.clone()));
+                        last_saved.set(Some("草稿已保存".to_string()));
+                        
+                        spawn(async move {
+                            TimeoutFuture::new(3000).await;
+                            last_saved.set(None);
+                        });
+                    }
+                    Err(e) => {
+                        error.set(Some(format!("创建草稿失败: {}", e.message)));
+                    }
+                }
+            }
+            
+            is_saving.set(false);
+        });
     };
     
     // 自动保存
@@ -116,18 +195,43 @@ pub fn EditorV2Page(slug: Option<String>) -> Element {
     
     // 发布文章
     let publish = move || {
-        if let Some(art) = article() {
-            spawn(async move {
-                is_saving.set(true);
+        spawn(async move {
+            is_saving.set(true);
+            error.set(None);
+            
+            let tags: Vec<String> = tags_input()
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            
+            if let Some(art) = article() {
+                // 更新现有文章并发布
+                // 处理封面图URL，如果是相对路径则转换为完整URL
+                let processed_cover_image_url = if cover_image_url().is_empty() {
+                    None
+                } else {
+                    let url = cover_image_url();
+                    if url.starts_with("/api/") {
+                        // API相对路径，需要添加后端域名
+                        let api_origin = API_BASE_URL.trim_end_matches("/api");
+                        Some(format!("{}{}", api_origin, url))
+                    } else if url.starts_with("http://") || url.starts_with("https://") {
+                        // 已经是完整URL
+                        Some(url)
+                    } else {
+                        // 其他格式，尝试作为完整URL
+                        Some(url)
+                    }
+                };
                 
-                // 先更新文章内容
                 let update_request = UpdateArticleRequest {
                     title: Some(title()),
-                    subtitle: Some(subtitle()),
+                    subtitle: if subtitle().is_empty() { None } else { Some(subtitle()) },
                     content: Some(content()),
-                    excerpt: Some(excerpt()),
-                    cover_image_url: Some(cover_image_url()),
-                    tags: Some(tags_input().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()),
+                    excerpt: if excerpt().is_empty() { None } else { Some(excerpt()) },
+                    cover_image_url: processed_cover_image_url,
+                    tags: Some(tags),
                     is_paid_content: None,
                     series_id: None,
                     publication_id: None,
@@ -162,10 +266,70 @@ pub fn EditorV2Page(slug: Option<String>) -> Element {
                         error.set(Some(format!("更新失败: {}", e.message)));
                     }
                 }
+            } else {
+                // 创建新文章并直接发布
+                // 处理封面图URL，如果是相对路径则转换为完整URL
+                let processed_cover_image_url = if cover_image_url().is_empty() {
+                    None
+                } else {
+                    let url = cover_image_url();
+                    if url.starts_with("/api/") {
+                        // API相对路径，需要添加后端域名
+                        let api_origin = API_BASE_URL.trim_end_matches("/api");
+                        Some(format!("{}{}", api_origin, url))
+                    } else if url.starts_with("http://") || url.starts_with("https://") {
+                        // 已经是完整URL
+                        Some(url)
+                    } else {
+                        // 其他格式，尝试作为完整URL
+                        Some(url)
+                    }
+                };
                 
-                is_saving.set(false);
-            });
-        }
+                let request = CreateArticleRequest {
+                    title: title(),
+                    subtitle: if subtitle().is_empty() { None } else { Some(subtitle()) },
+                    content: content(),
+                    excerpt: if excerpt().is_empty() { None } else { Some(excerpt()) },
+                    cover_image_url: processed_cover_image_url,
+                    publication_id: None,
+                    series_id: None,
+                    series_order: None,
+                    is_paid_content: false,
+                    tags,
+                    save_as_draft: true,  // create 接口总是创建草稿
+                    seo_title: None,
+                    seo_description: None,
+                    seo_keywords: None,
+                };
+                
+                match ArticleService::create_article(&request).await {
+                    Ok(created_article) => {
+                        // 创建成功后，立即发布文章
+                        web_sys::console::log_1(&format!("Created article with ID: {}", created_article.id).into());
+                        
+                        match ArticleService::publish_article(&created_article.id).await {
+                            Ok(published) => {
+                                // 导航到文章页面
+                                web_sys::window()
+                                    .unwrap()
+                                    .location()
+                                    .set_href(&format!("/article/{}", published.slug))
+                                    .ok();
+                            }
+                            Err(e) => {
+                                error.set(Some(format!("发布失败: {}", e.message)));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error.set(Some(format!("创建文章失败: {}", e.message)));
+                    }
+                }
+            }
+            
+            is_saving.set(false);
+        });
     };
     
     // 恢复版本

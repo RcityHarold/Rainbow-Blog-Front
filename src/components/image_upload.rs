@@ -140,7 +140,6 @@ pub fn ImageDropZone(
     placeholder_text: Option<String>,
 ) -> Element {
     let mut dragging = use_signal(|| false);
-    let mut uploading = use_signal(|| false);
     let placeholder = placeholder_text.unwrap_or_else(|| "点击或拖拽图片到此处上传".to_string());
     
     let handle_drop = move |_: DragEvent| {
@@ -166,18 +165,9 @@ pub fn ImageDropZone(
                 } else {
                     "border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-8 text-center transition-all hover:border-gray-400"
                 },
-                onclick: move |_| {
-                    // 点击区域触发文件选择
-                    if let Some(window) = web_sys::window() {
-                        if let Some(document) = window.document() {
-                            if let Some(input) = document.query_selector(&format!("#dropzone-file-input")).ok().flatten() {
-                                if let Ok(input) = input.dyn_into::<HtmlInputElement>() {
-                                    input.click();
-                                }
-                            }
-                        }
-                    }
-                },
+                ondrop: handle_drop,
+                ondragover: handle_drag_over,
+                ondragleave: handle_drag_leave,
                 
                 if let Some(image_url) = current_image {
                     div {
@@ -221,60 +211,6 @@ pub fn ImageDropZone(
                         ImageUpload {
                             on_upload: on_upload.clone(),
                             on_error: on_error.clone()
-                        }
-                        
-                        // 隐藏的文件输入用于点击上传
-                        input {
-                            id: "dropzone-file-input",
-                            r#type: "file",
-                            accept: "image/jpeg,image/png,image/gif,image/webp",
-                            class: "hidden",
-                            onchange: move |_| {
-                                spawn(async move {
-                                    let window = web_sys::window().unwrap();
-                                    let document = window.document().unwrap();
-                                    
-                                    if let Some(input) = document.get_element_by_id("dropzone-file-input").and_then(|e| e.dyn_into::<HtmlInputElement>().ok()) {
-                                        if let Some(files) = input.files() {
-                                            if files.length() > 0 {
-                                                if let Some(file) = files.get(0) {
-                                                    uploading.set(true);
-                                                    
-                                                    match UploadService::upload_image(file).await {
-                                                        Ok(response) => {
-                                                            on_upload.call(response.url);
-                                                        }
-                                                        Err(e) => {
-                                                            if let Some(ref on_error) = on_error {
-                                                                on_error.call(e.message);
-                                                            }
-                                                        }
-                                                    }
-                                                    
-                                                    uploading.set(false);
-                                                    input.set_value("");
-                                                }
-                                            }
-                                        }
-                                    }
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-            
-            if uploading() {
-                div {
-                    class: "absolute inset-0 bg-white bg-opacity-75 dark:bg-gray-900 dark:bg-opacity-75 rounded-lg flex items-center justify-center",
-                    div {
-                        class: "text-center",
-                        div {
-                            class: "animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-white mx-auto mb-2"
-                        }
-                        p {
-                            class: "text-sm text-gray-600 dark:text-gray-400",
-                            "上传中..."
                         }
                     }
                 }

@@ -163,8 +163,8 @@ pub fn ArticleCard(article: Article) -> Element {
                                     // 处理书签点击
                                 },
                                 svg {
-                                    class: if article.is_bookmarked { "w-5 h-5 text-gray-900 fill-current" } else { "w-5 h-5 text-gray-500" },
-                                    fill: if article.is_bookmarked { "currentColor" } else { "none" },
+                                    class: if article.is_bookmarked.unwrap_or(false) { "w-5 h-5 text-gray-900 fill-current" } else { "w-5 h-5 text-gray-500" },
+                                    fill: if article.is_bookmarked.unwrap_or(false) { "currentColor" } else { "none" },
                                     stroke: "currentColor",
                                     view_box: "0 0 24 24",
                                     path {

@@ -446,10 +446,12 @@ fn AddArticleModal(
                                             {article.title.clone()}
                                         }
                                         
-                                        if !article.excerpt.is_empty() {
-                                            p {
-                                                class: "text-sm text-gray-600 dark:text-gray-400 line-clamp-2",
-                                                {article.excerpt.clone()}
+                                        if let Some(excerpt) = &article.excerpt {
+                                            if !excerpt.is_empty() {
+                                                p {
+                                                    class: "text-sm text-gray-600 dark:text-gray-400 line-clamp-2",
+                                                    {excerpt.clone()}
+                                                }
                                             }
                                         }
                                     }

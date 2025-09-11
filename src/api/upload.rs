@@ -28,11 +28,8 @@ impl UploadService {
             status: 0,
         })?;
         
-        // 获取原生的 reqwest 客户端进行文件上传
-        let window = web_sys::window().unwrap();
-        let location = window.location();
-        let origin = location.origin().unwrap_or_default();
-        let url = format!("{}/api/blog/upload/image", origin);
+        // 使用 API 基础 URL 进行文件上传
+        let url = format!("{}/blog/media/upload", crate::api::client::API_BASE_URL);
         
         // 使用 fetch API 进行上传
         let opts = web_sys::RequestInit::new();
@@ -52,6 +49,7 @@ impl UploadService {
                 status: 0,
             })?;
         
+        let window = web_sys::window().unwrap();
         let response = wasm_bindgen_futures::JsFuture::from(window.fetch_with_request(&request))
             .await
             .map_err(|_| ApiError {

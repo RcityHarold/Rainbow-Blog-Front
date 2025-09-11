@@ -62,12 +62,12 @@ pub fn ArticlePage(slug: String) -> Element {
                 
                 match ArticleService::clap_article(&article_id, 1).await {
                     Ok(ClapResponse { user_clap_count, total_claps }) => {
-                        article.write().as_mut().unwrap().user_clap_count = user_clap_count;
-                        article.write().as_mut().unwrap().clap_count = total_claps;
-                        article.write().as_mut().unwrap().is_clapped = true;
+                        article.write().as_mut().unwrap().user_clap_count = Some(user_clap_count);
+                        article.write().as_mut().unwrap().clap_count = total_claps as i32;
+                        article.write().as_mut().unwrap().is_clapped = Some(true);
                     }
-                    Err(_) => {
-                        // 处理错误
+                    Err(e) => {
+                        web_sys::console::error_1(&format!("Failed to clap article: {:?}", e).into());
                     }
                 }
                 
@@ -85,7 +85,7 @@ pub fn ArticlePage(slug: String) -> Element {
         
         if let Some(ref art) = article() {
             let article_id = art.id.clone();
-            let is_bookmarked = art.is_bookmarked;
+            let is_bookmarked = art.is_bookmarked.unwrap_or(false);
             
             spawn(async move {
                 is_bookmarking.set(true);
@@ -97,7 +97,7 @@ pub fn ArticlePage(slug: String) -> Element {
                 };
                 
                 if result.is_ok() {
-                    article.write().as_mut().unwrap().is_bookmarked = !is_bookmarked;
+                    article.write().as_mut().unwrap().is_bookmarked = Some(!is_bookmarked);
                     if !is_bookmarked {
                         article.write().as_mut().unwrap().bookmark_count += 1;
                     } else {
@@ -281,8 +281,8 @@ pub fn ArticlePage(slug: String) -> Element {
                                     disabled: is_clapping(),
                                     
                                     svg {
-                                        class: if art.is_clapped { "w-6 h-6 text-gray-900" } else { "w-6 h-6 text-gray-500" },
-                                        fill: if art.is_clapped { "currentColor" } else { "none" },
+                                        class: if art.is_clapped.unwrap_or(false) { "w-6 h-6 text-gray-900" } else { "w-6 h-6 text-gray-500" },
+                                        fill: if art.is_clapped.unwrap_or(false) { "currentColor" } else { "none" },
                                         stroke: "currentColor",
                                         view_box: "0 0 24 24",
                                         path {
@@ -298,10 +298,10 @@ pub fn ArticlePage(slug: String) -> Element {
                                         {art.clap_count.to_string()}
                                     }
                                     
-                                    if art.user_clap_count > 0 {
+                                    if art.user_clap_count.unwrap_or(0) > 0 {
                                         span {
                                             class: "text-xs text-gray-500",
-                                            "(+{art.user_clap_count})"
+                                            "(+{art.user_clap_count.unwrap_or(0)})"
                                         }
                                     }
                                 }
@@ -339,8 +339,8 @@ pub fn ArticlePage(slug: String) -> Element {
                                     disabled: is_bookmarking(),
                                     
                                     svg {
-                                        class: if art.is_bookmarked { "w-6 h-6 text-gray-900 fill-current" } else { "w-6 h-6 text-gray-500" },
-                                        fill: if art.is_bookmarked { "currentColor" } else { "none" },
+                                        class: if art.is_bookmarked.unwrap_or(false) { "w-6 h-6 text-gray-900 fill-current" } else { "w-6 h-6 text-gray-500" },
+                                        fill: if art.is_bookmarked.unwrap_or(false) { "currentColor" } else { "none" },
                                         stroke: "currentColor",
                                         view_box: "0 0 24 24",
                                         path {

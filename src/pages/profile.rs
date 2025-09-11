@@ -456,7 +456,13 @@ pub fn ProfilePage(username: String) -> Element {
                                         "py-4 px-1 border-b-2 border-transparent font-medium text-sm text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-all duration-200" 
                                     },
                                     onclick: move |_| active_tab.set("articles"),
-                                    "文章 ({user_profile.article_count})"
+                                    {
+                                        if let Some(p) = profile() {
+                                            format!("文章 ({})", p.article_count)
+                                        } else {
+                                            "文章".to_string()
+                                        }
+                                    }
                                 }
                                 button {
                                     class: if active_tab() == "about" { 

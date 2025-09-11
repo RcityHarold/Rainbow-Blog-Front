@@ -5,10 +5,10 @@ use std::time::Duration;
 
 // 在 WASM 环境中，需要使用完整的 URL
 #[cfg(target_arch = "wasm32")]
-const API_BASE_URL: &str = "http://127.0.0.1:8000/api";
+pub const API_BASE_URL: &str = "http://127.0.0.1:8000/api";
 
 #[cfg(not(target_arch = "wasm32"))]
-const API_BASE_URL: &str = "/api";
+pub const API_BASE_URL: &str = "/api";
 const TOKEN_KEY: &str = "auth_token";
 
 // API 响应包装器
@@ -85,6 +85,10 @@ impl ApiClient {
                 status: status.as_u16(),
             })?;
             
+            // Log response for debugging in development
+            #[cfg(debug_assertions)]
+            web_sys::console::log_1(&format!("API Response: {}", text).into());
+            
             // Try to parse as wrapped response first
             match serde_json::from_str::<ApiResponseWrapper<T>>(&text) {
                 Ok(wrapped) => {
@@ -97,7 +101,10 @@ impl ApiClient {
                         })
                     }
                 }
-                Err(_) => {
+                Err(e) => {
+                    #[cfg(debug_assertions)]
+                    web_sys::console::error_1(&format!("Failed to parse wrapped response: {}", e).into());
+                    
                     // If wrapped parsing fails, try direct parsing (for backward compatibility)
                     serde_json::from_str::<T>(&text).map_err(|e| ApiError {
                         message: format!("Failed to parse response: {}", e),
