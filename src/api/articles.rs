@@ -2,12 +2,14 @@ use super::client::{ApiClient, ApiResult};
 use crate::models::article::{Article, ArticleListResponse, CreateArticleRequest, UpdateArticleRequest, Author};
 use once_cell::sync::Lazy;
 use chrono::{DateTime, Utc};
+use serde::Deserialize;
 
 static API_CLIENT: Lazy<ApiClient> = Lazy::new(ApiClient::new);
 
 // 后端返回的简化文章数据结构
 #[derive(Debug, serde::Deserialize)]
 struct RawArticleResponse {
+    #[serde(deserialize_with = "deserialize_article_id")]
     id: String,
     title: String,
     subtitle: Option<String>,
@@ -31,6 +33,86 @@ struct RawArticleResponse {
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
     published_at: Option<DateTime<Utc>>,
+}
+
+// 列表接口返回的文章数据 (没有content等详细信息)
+#[derive(Debug, serde::Deserialize)]
+pub struct RawArticleListItem {
+    #[serde(deserialize_with = "deserialize_article_id")]
+    pub id: String,
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub slug: String,
+    pub excerpt: Option<String>,
+    pub cover_image_url: Option<String>,
+    pub author: RawAuthorInfo,
+    pub publication: Option<RawPublicationInfo>,
+    pub status: String,
+    pub is_paid_content: bool,
+    pub is_featured: bool,
+    pub reading_time: i32,
+    pub view_count: i32,
+    pub clap_count: i32,
+    pub comment_count: i32,
+    pub tags: Vec<RawTagInfo>,
+    pub created_at: DateTime<Utc>,
+    pub published_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct RawAuthorInfo {
+    pub id: String,
+    pub username: String,
+    pub display_name: String,
+    pub avatar_url: Option<String>,
+    pub is_verified: bool,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct RawPublicationInfo {
+    pub id: String,
+    pub name: String,
+    pub slug: String,
+    pub logo_url: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct RawTagInfo {
+    pub id: String,
+    pub name: String,
+    pub slug: String,
+}
+
+// 自定义反序列化函数来处理article ID格式
+fn deserialize_article_id<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    
+    match value {
+        serde_json::Value::String(s) => {
+            // 如果是字符串，检查是否是article:{"String":"uuid"}格式
+            if s.starts_with("article:{") && s.ends_with("}") {
+                // 尝试解析Thing ID格式
+                if let Some(start) = s.find(r#""String":""#) {
+                    let start = start + r#""String":""#.len();
+                    if let Some(end) = s[start..].find('"') {
+                        return Ok(format!("article:{}", &s[start..start + end]));
+                    }
+                }
+            }
+            Ok(s)
+        },
+        _ => Err(serde::de::Error::custom("Expected string for article ID")),
+    }
+}
+
+// 自定义的文章列表响应，用于处理后端返回的数据
+#[derive(Debug, serde::Deserialize)]
+pub struct RawArticleListResponse {
+    pub articles: Vec<RawArticleListItem>,
+    pub pagination: crate::models::article::Pagination,
 }
 
 pub struct ArticleService;
@@ -58,7 +140,63 @@ impl ArticleService {
             url = format!("{}?{}", url, query_params.join("&"));
         }
         
-        API_CLIENT.get(&url).await
+        // 获取原始响应并转换
+        let raw_response: RawArticleListResponse = API_CLIENT.get(&url).await?;
+        
+        // 将原始文章转换为前端期望的格式
+        let articles = raw_response.articles.into_iter().map(|raw| Article {
+            id: raw.id,
+            title: raw.title,
+            subtitle: raw.subtitle,
+            slug: raw.slug,
+            content: String::new(), // 列表接口不返回内容
+            content_html: String::new(),
+            excerpt: raw.excerpt,
+            cover_image_url: raw.cover_image_url,
+            author: Author {
+                id: raw.author.id,
+                username: raw.author.username,
+                display_name: raw.author.display_name,
+                avatar_url: raw.author.avatar_url,
+                is_verified: raw.author.is_verified,
+            },
+            publication: raw.publication.map(|p| crate::models::article::Publication {
+                id: p.id,
+                name: p.name,
+                slug: p.slug,
+                logo_url: p.logo_url,
+            }),
+            series: None,
+            tags: raw.tags.into_iter().map(|t| crate::models::article::Tag {
+                id: t.id,
+                name: t.name,
+                slug: t.slug,
+            }).collect(),
+            status: raw.status,
+            is_paid_content: raw.is_paid_content,
+            is_featured: raw.is_featured,
+            reading_time: raw.reading_time,
+            word_count: 0, // 列表接口不返回字数
+            view_count: raw.view_count,
+            clap_count: raw.clap_count,
+            comment_count: raw.comment_count,
+            bookmark_count: 0, // 列表接口不返回收藏数
+            share_count: 0, // 列表接口不返回分享数
+            seo_title: None,
+            seo_description: None,
+            seo_keywords: vec![],
+            created_at: raw.created_at,
+            updated_at: raw.created_at, // 列表接口不返回更新时间
+            published_at: raw.published_at,
+            is_bookmarked: None,
+            is_clapped: None,
+            user_clap_count: None,
+        }).collect();
+        
+        Ok(ArticleListResponse {
+            articles,
+            pagination: raw_response.pagination,
+        })
     }
     
     pub async fn get_trending_articles(
@@ -70,7 +208,72 @@ impl ArticleService {
             "/blog/articles/trending".to_string()
         };
         
-        API_CLIENT.get(&url).await
+        // 获取原始响应并转换
+        let raw_articles: Vec<RawArticleListItem> = API_CLIENT.get(&url).await?;
+        
+        // 将原始文章转换为前端期望的格式
+        let articles: Vec<Article> = raw_articles.into_iter().map(|raw| Article {
+            id: raw.id,
+            title: raw.title,
+            subtitle: raw.subtitle,
+            slug: raw.slug,
+            content: String::new(),
+            content_html: String::new(),
+            excerpt: raw.excerpt,
+            cover_image_url: raw.cover_image_url,
+            author: Author {
+                id: raw.author.id,
+                username: raw.author.username,
+                display_name: raw.author.display_name,
+                avatar_url: raw.author.avatar_url,
+                is_verified: raw.author.is_verified,
+            },
+            publication: raw.publication.map(|p| crate::models::article::Publication {
+                id: p.id,
+                name: p.name,
+                slug: p.slug,
+                logo_url: p.logo_url,
+            }),
+            series: None,
+            tags: raw.tags.into_iter().map(|t| crate::models::article::Tag {
+                id: t.id,
+                name: t.name,
+                slug: t.slug,
+            }).collect(),
+            status: raw.status,
+            is_paid_content: raw.is_paid_content,
+            is_featured: raw.is_featured,
+            reading_time: raw.reading_time,
+            word_count: 0,
+            view_count: raw.view_count,
+            clap_count: raw.clap_count,
+            comment_count: raw.comment_count,
+            bookmark_count: 0,
+            share_count: 0,
+            seo_title: None,
+            seo_description: None,
+            seo_keywords: vec![],
+            created_at: raw.created_at,
+            updated_at: raw.created_at,
+            published_at: raw.published_at,
+            is_bookmarked: None,
+            is_clapped: None,
+            user_clap_count: None,
+        }).collect();
+        
+        let article_count = articles.len() as i32;
+        
+        Ok(ArticleListResponse {
+            articles,
+            pagination: crate::models::article::Pagination {
+                current_page: 1,
+                total_pages: 1,
+                total_items: article_count,
+                items_per_page: article_count,
+                has_next: false,
+                has_prev: false,
+            },
+        })
     }
     
     pub async fn get_popular_articles(
@@ -82,7 +285,72 @@ impl ArticleService {
             "/blog/articles/popular".to_string()
         };
         
-        API_CLIENT.get(&url).await
+        // 获取原始响应并转换
+        let raw_articles: Vec<RawArticleListItem> = API_CLIENT.get(&url).await?;
+        
+        // 将原始文章转换为前端期望的格式
+        let articles: Vec<Article> = raw_articles.into_iter().map(|raw| Article {
+            id: raw.id,
+            title: raw.title,
+            subtitle: raw.subtitle,
+            slug: raw.slug,
+            content: String::new(),
+            content_html: String::new(),
+            excerpt: raw.excerpt,
+            cover_image_url: raw.cover_image_url,
+            author: Author {
+                id: raw.author.id,
+                username: raw.author.username,
+                display_name: raw.author.display_name,
+                avatar_url: raw.author.avatar_url,
+                is_verified: raw.author.is_verified,
+            },
+            publication: raw.publication.map(|p| crate::models::article::Publication {
+                id: p.id,
+                name: p.name,
+                slug: p.slug,
+                logo_url: p.logo_url,
+            }),
+            series: None,
+            tags: raw.tags.into_iter().map(|t| crate::models::article::Tag {
+                id: t.id,
+                name: t.name,
+                slug: t.slug,
+            }).collect(),
+            status: raw.status,
+            is_paid_content: raw.is_paid_content,
+            is_featured: raw.is_featured,
+            reading_time: raw.reading_time,
+            word_count: 0,
+            view_count: raw.view_count,
+            clap_count: raw.clap_count,
+            comment_count: raw.comment_count,
+            bookmark_count: 0,
+            share_count: 0,
+            seo_title: None,
+            seo_description: None,
+            seo_keywords: vec![],
+            created_at: raw.created_at,
+            updated_at: raw.created_at,
+            published_at: raw.published_at,
+            is_bookmarked: None,
+            is_clapped: None,
+            user_clap_count: None,
+        }).collect();
+        
+        let article_count = articles.len() as i32;
+        
+        Ok(ArticleListResponse {
+            articles,
+            pagination: crate::models::article::Pagination {
+                current_page: 1,
+                total_pages: 1,
+                total_items: article_count,
+                items_per_page: article_count,
+                has_next: false,
+                has_prev: false,
+            },
+        })
     }
     
     pub async fn get_article(slug: &str) -> ApiResult<Article> {
@@ -300,8 +568,65 @@ impl ArticleService {
     
     pub async fn get_articles_by_tag(tag_slug: &str, sort_by: &str, page: i32, per_page: Option<i32>) -> ApiResult<ArticleListResponse> {
         let per_page = per_page.unwrap_or(20);
-        let url = format!("/blog/articles?tag={}&sort_by={}&page={}&per_page={}", tag_slug, sort_by, page, per_page);
-        API_CLIENT.get(&url).await
+        let url = format!("/blog/articles?tag={}&sort={}&page={}&limit={}", tag_slug, sort_by, page, per_page);
+        
+        // 获取原始响应并转换
+        let raw_response: RawArticleListResponse = API_CLIENT.get(&url).await?;
+        
+        // 将原始文章转换为前端期望的格式
+        let articles = raw_response.articles.into_iter().map(|raw| Article {
+            id: raw.id,
+            title: raw.title,
+            subtitle: raw.subtitle,
+            slug: raw.slug,
+            content: String::new(),
+            content_html: String::new(),
+            excerpt: raw.excerpt,
+            cover_image_url: raw.cover_image_url,
+            author: Author {
+                id: raw.author.id,
+                username: raw.author.username,
+                display_name: raw.author.display_name,
+                avatar_url: raw.author.avatar_url,
+                is_verified: raw.author.is_verified,
+            },
+            publication: raw.publication.map(|p| crate::models::article::Publication {
+                id: p.id,
+                name: p.name,
+                slug: p.slug,
+                logo_url: p.logo_url,
+            }),
+            series: None,
+            tags: raw.tags.into_iter().map(|t| crate::models::article::Tag {
+                id: t.id,
+                name: t.name,
+                slug: t.slug,
+            }).collect(),
+            status: raw.status,
+            is_paid_content: raw.is_paid_content,
+            is_featured: raw.is_featured,
+            reading_time: raw.reading_time,
+            word_count: 0,
+            view_count: raw.view_count,
+            clap_count: raw.clap_count,
+            comment_count: raw.comment_count,
+            bookmark_count: 0,
+            share_count: 0,
+            seo_title: None,
+            seo_description: None,
+            seo_keywords: vec![],
+            created_at: raw.created_at,
+            updated_at: raw.created_at,
+            published_at: raw.published_at,
+            is_bookmarked: None,
+            is_clapped: None,
+            user_clap_count: None,
+        }).collect();
+        
+        Ok(ArticleListResponse {
+            articles,
+            pagination: raw_response.pagination,
+        })
     }
 }
 

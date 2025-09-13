@@ -424,22 +424,35 @@ fn CommentForm(
     let mut submitting = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     
+    // 克隆需要在多个闭包中使用的值
+    let article_id_for_submit = article_id.clone();
+    let parent_id_for_submit = parent_id.clone();
+    
     let parent_id_clone = parent_id.clone();
-    let handle_submit = move |e: Event<FormData>| {
+    let _handle_submit = move |e: Event<FormData>| {
         e.prevent_default();
+        e.stop_propagation();  // 添加停止事件传播
+        
+        #[cfg(debug_assertions)]
+        web_sys::console::log_1(&"Comment form submitted!".into());
         
         let comment_content = content();
         if comment_content.trim().is_empty() {
+            #[cfg(debug_assertions)]
+            web_sys::console::log_1(&"Comment content is empty, returning".into());
             return;
         }
+        
+        #[cfg(debug_assertions)]
+        web_sys::console::log_1(&format!("Submitting comment: {}", comment_content).into());
         
         submitting.set(true);
         error.set(None);
         
         let request = CreateCommentRequest {
-            article_id: article_id.clone(),
+            article_id: article_id_for_submit.clone(),
             content: comment_content,
-            parent_id: parent_id_clone.clone(),
+            parent_id: parent_id_for_submit.clone(),
         };
         
         spawn(async move {
@@ -458,7 +471,7 @@ fn CommentForm(
     
     rsx! {
         form {
-            onsubmit: handle_submit,
+            // 移除 onsubmit，使用按钮的 onclick 代替
             class: "space-y-4",
             
             textarea {
@@ -499,9 +512,49 @@ fn CommentForm(
                         }
                     }
                     button {
-                        r#type: "submit",
+                        r#type: "button",  // 改为 button 类型避免表单默认提交
                         class: "px-4 py-2 bg-green-600 text-white rounded-full text-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed",
                         disabled: submitting() || content().trim().is_empty(),
+                        onclick: {
+                            let article_id = article_id.clone();
+                            let parent_id = parent_id.clone();
+                            let on_success = on_success.clone();
+                            
+                            move |e: Event<MouseData>| {
+                                e.prevent_default();
+                                e.stop_propagation();
+                                
+                                #[cfg(debug_assertions)]
+                                web_sys::console::log_1(&"Button clicked - submitting comment".into());
+                                
+                                let comment_content = content();
+                                if comment_content.trim().is_empty() {
+                                    return;
+                                }
+                                
+                                submitting.set(true);
+                                error.set(None);
+                                
+                                let request = CreateCommentRequest {
+                                    article_id: article_id.clone(),
+                                    content: comment_content,
+                                    parent_id: parent_id.clone(),
+                                };
+                            
+                                spawn(async move {
+                                    match CommentService::create_comment(&request).await {
+                                        Ok(comment) => {
+                                            content.set(String::new());
+                                            on_success.call(comment);
+                                        }
+                                        Err(e) => {
+                                            error.set(Some(e.message));
+                                        }
+                                    }
+                                    submitting.set(false);
+                                });
+                            }
+                        },
                         if submitting() {
                             "发布中..."
                         } else {

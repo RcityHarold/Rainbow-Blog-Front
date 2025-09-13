@@ -56,15 +56,22 @@ impl ApiClient {
     }
     
     pub fn get_token() -> Option<String> {
-        LocalStorage::get::<String>(TOKEN_KEY).ok()
+        // 使用 raw() 方法避免自动 JSON 序列化/反序列化
+        LocalStorage::raw()
+            .get(TOKEN_KEY)
+            .ok()
+            .flatten()
     }
     
     pub fn set_token(token: &str) {
-        LocalStorage::set(TOKEN_KEY, token).ok();
+        // 使用 raw() 方法直接存储字符串，避免 JSON 序列化
+        LocalStorage::raw()
+            .set(TOKEN_KEY, token)
+            .ok();
     }
     
     pub fn clear_token() {
-        LocalStorage::delete(TOKEN_KEY);
+        LocalStorage::raw().delete(TOKEN_KEY).ok();
     }
     
     fn add_auth_header(&self, request: RequestBuilder) -> RequestBuilder {
@@ -140,6 +147,21 @@ impl ApiClient {
         body: &T,
     ) -> ApiResult<R> {
         let url = format!("{}{}", API_BASE_URL, path);
+        
+        #[cfg(debug_assertions)]
+        {
+            web_sys::console::log_1(&format!("POST request to: {}", url).into());
+            if let Ok(body_str) = serde_json::to_string(body) {
+                web_sys::console::log_1(&format!("Request body: {}", body_str).into());
+            }
+            if let Some(token) = Self::get_token() {
+                web_sys::console::log_1(&format!("Token available: {} chars", token.len()).into());
+                web_sys::console::log_1(&format!("Token first char: {:?}", token.chars().next()).into());
+            } else {
+                web_sys::console::log_1(&"No token available".into());
+            }
+        }
+        
         let request = self.client.post(&url).json(body);
         let request = self.add_auth_header(request);
         

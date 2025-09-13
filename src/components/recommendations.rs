@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use dioxus_router::prelude::*;
 use crate::{
-    api::recommendations::{RecommendationService, RecommendationParams, RecommendedArticle},
+    api::recommendations::{RecommendationService, RecommendationParams, RecommendedArticle, TrendingArticle},
     components::ArticleCard,
     hooks::use_auth,
     Route,
@@ -148,7 +148,7 @@ pub fn PersonalizedRecommendations() -> Element {
 #[component]
 pub fn TrendingArticles(period: String) -> Element {
     let period = period.clone();
-    let mut articles = use_signal(|| Vec::<crate::models::article::Article>::new());
+    let mut articles = use_signal(|| Vec::<TrendingArticle>::new());
     let mut loading = use_signal(|| true);
     
     use_effect({
@@ -166,8 +166,8 @@ pub fn TrendingArticles(period: String) -> Element {
                     Ok(response) => {
                         articles.set(response.articles);
                     }
-                    Err(_) => {
-                        // 错误处理
+                    Err(e) => {
+                        web_sys::console::error_1(&format!("Failed to load trending articles: {:?}", e).into());
                     }
                 }
                 
@@ -225,6 +225,12 @@ pub fn TrendingArticles(period: String) -> Element {
                                         span { class: "mx-1", "·" }
                                         span {
                                             "{article.reading_time} 分钟"
+                                        }
+                                        if article.clap_count > 0 {
+                                            span { class: "mx-1", "·" }
+                                            span {
+                                                "{article.clap_count} 👏"
+                                            }
                                         }
                                     }
                                 }
