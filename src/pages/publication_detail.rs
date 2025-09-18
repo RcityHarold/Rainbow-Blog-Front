@@ -16,6 +16,11 @@ pub fn PublicationDetailPage(slug: String) -> Element {
     let mut loading = use_signal(|| true);
     let mut is_following = use_signal(|| false);
     let mut active_tab = use_signal(|| "articles");
+    let mut members = use_signal(|| Vec::<crate::models::publication::PublicationMember>::new());
+    let mut members_loading = use_signal(|| false);
+    let mut add_user_id = use_signal(|| String::new());
+    let mut add_role = use_signal(|| String::from("writer"));
+    let mut members_error = use_signal(|| None::<String>);
     let auth = use_auth();
     
     // 加载出版物详情
@@ -61,6 +66,56 @@ pub fn PublicationDetailPage(slug: String) -> Element {
                 if result.is_ok() {
                     is_following.set(!is_following());
                 }
+            });
+        }
+    };
+
+    // 加载成员列表（当切换到成员Tab时）
+    use_effect(move || {
+        if active_tab() == "members" {
+            if let Some(pub_data) = publication() {
+                let pub_id = pub_data.id.clone();
+                spawn(async move {
+                    members_loading.set(true);
+                    members_error.set(None);
+                    match PublicationService::get_members(&pub_id, None, None, Some(1), Some(50)).await {
+                        Ok(resp) => members.set(resp.members),
+                        Err(e) => members_error.set(Some(format!("加载成员失败: {}", e.message))),
+                    }
+                    members_loading.set(false);
+                });
+            }
+        }
+    });
+
+    // 添加成员（简单版，权限由后端校验）
+    let handle_add_member = move |e: Event<FormData>| {
+        e.prevent_default();
+        if let Some(pub_data) = publication() {
+            let pub_id = pub_data.id.clone();
+            let uid = add_user_id();
+            let role = add_role();
+            spawn(async move {
+                members_loading.set(true);
+                members_error.set(None);
+                let req = crate::models::publication::AddMemberRequest {
+                    user_id: uid.clone(),
+                    role: match role.as_str() {
+                        "owner" => crate::models::publication::MemberRole::Owner,
+                        "editor" => crate::models::publication::MemberRole::Editor,
+                        "writer" => crate::models::publication::MemberRole::Writer,
+                        _ => crate::models::publication::MemberRole::Contributor,
+                    },
+                    message: None,
+                };
+                match PublicationService::add_member(&pub_id, &req).await {
+                    Ok(new_member) => {
+                        members.write().push(new_member);
+                        add_user_id.set(String::new());
+                    }
+                    Err(e) => members_error.set(Some(format!("添加失败: {}", e.message))),
+                }
+                members_loading.set(false);
             });
         }
     };
@@ -340,10 +395,55 @@ pub fn PublicationDetailPage(slug: String) -> Element {
                     // 成员列表
                     if active_tab() == "members" {
                         div {
-                            class: "text-center py-12",
-                            p {
-                                class: "text-gray-500 dark:text-gray-400",
-                                "成员列表即将推出"
+                            class: "space-y-6",
+                            if let Some(err) = members_error() { 
+                                div { class: "p-3 rounded bg-red-50 text-red-700 border border-red-200", {err} }
+                            }
+                            // 添加成员表单（权限由后端校验）
+                            form { onsubmit: handle_add_member,
+                                class: "flex flex-col md:flex-row gap-3 items-start md:items-end",
+                                div { class: "flex-1",
+                                    label { class: "block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300", "用户ID" }
+                                    input { class: "w-full border rounded px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white",
+                                        value: add_user_id(),
+                                        oninput: move |e| add_user_id.set(e.value())
+                                    }
+                                }
+                                div { class: "",
+                                    label { class: "block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300", "角色" }
+                                    select { class: "border rounded px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white",
+                                        value: add_role(),
+                                        oninput: move |e| add_role.set(e.value()),
+                                        option { value: "owner", "Owner" }
+                                        option { value: "editor", "Editor" }
+                                        option { value: "writer", "Writer" }
+                                        option { value: "contributor", "Contributor" }
+                                    }
+                                }
+                                button { r#type: "submit",
+                                    class: "px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50",
+                                    disabled: members_loading(),
+                                    if members_loading() { "处理中..." } else { "添加成员" }
+                                }
+                            }
+
+                            // 成员列表展示
+                            if members().is_empty() {
+                                div { class: "text-gray-500 dark:text-gray-400", "暂无成员" }
+                            } else {
+                                div { class: "divide-y divide-gray-200 dark:divide-gray-700 rounded border border-gray-200 dark:border-gray-700",
+                                    for m in members() {
+                                        div { class: "p-4 flex items-center justify-between",
+                                            div { class: "",
+                                                div { class: "font-medium text-gray-900 dark:text-white", { m.user.display_name.clone().unwrap_or(m.user.username.clone()) } }
+                                                div { class: "text-sm text-gray-500 dark:text-gray-400", {m.user.id.clone()} }
+                                            }
+                                            div { class: "text-sm text-gray-600 dark:text-gray-300",
+                                                { format!("角色: {:?}", m.role) }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

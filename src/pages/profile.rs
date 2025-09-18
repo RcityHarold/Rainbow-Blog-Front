@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
 use dioxus_router::prelude::*;
 use crate::{
-    api::{users::UserService, articles::ArticleService},
+    api::{users::UserService, articles::ArticleService, bookmarks::BookmarkService},
     components::ArticleCard,
-    models::{user::UserProfile, article::Article},
+    models::{user::UserProfile, article::Article, bookmark::BookmarkItem},
     hooks::use_auth,
     Route,
 };
@@ -12,6 +12,7 @@ use crate::{
 pub fn ProfilePage(username: String) -> Element {
     let mut profile = use_signal(|| None::<UserProfile>);
     let mut articles = use_signal(|| Vec::<Article>::new());
+    let mut bookmarks = use_signal(|| Vec::<BookmarkItem>::new());
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
     let mut active_tab = use_signal(|| "articles");
@@ -650,6 +651,7 @@ pub fn ProfilePage(username: String) -> Element {
 pub fn ProfileByIdPage(user_id: String) -> Element {
     let mut profile = use_signal(|| None::<UserProfile>);
     let mut articles = use_signal(|| Vec::<Article>::new());
+    let mut bookmarks = use_signal(|| Vec::<BookmarkItem>::new());
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
     let mut active_tab = use_signal(|| "articles");
@@ -932,6 +934,26 @@ pub fn ProfileByIdPage(user_id: String) -> Element {
                             },
                             "文章"
                         }
+                        if is_own_profile {
+                            button {
+                                onclick: move |_| {
+                                    active_tab.set("bookmarks");
+                                    if bookmarks().is_empty() {
+                                        spawn(async move {
+                                            if let Ok(list) = BookmarkService::list(Some(1), Some(50)).await {
+                                                bookmarks.set(list);
+                                            }
+                                        });
+                                    }
+                                },
+                                class: if active_tab() == "bookmarks" {
+                                    "py-4 px-1 border-b-2 border-gray-900 font-medium text-gray-900"
+                                } else {
+                                    "py-4 px-1 border-b-2 border-transparent font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                                },
+                                "书签"
+                            }
+                        }
                         button {
                             onclick: move |_| active_tab.set("about"),
                             class: if active_tab() == "about" {
@@ -998,6 +1020,95 @@ pub fn ProfileByIdPage(user_id: String) -> Element {
                         } else {
                             for article in articles() {
                                 ArticleCard { article }
+                            }
+                        }
+                    }
+                }
+                // Bookmarks tab (only owner)
+                if active_tab() == "bookmarks" && is_own_profile {
+                    div {
+                        class: "space-y-6",
+                        if bookmarks().is_empty() {
+                            div { class: "text-gray-500 text-center py-8", "暂无书签" }
+                        } else {
+                            for b in bookmarks() {
+                                a {
+                                    href: "/article/{b.article_slug}",
+                                    class: "block p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors",
+                                    div { class: "flex items-start gap-4",
+                                        if let Some(cover) = &b.article_cover_image { 
+                                            img { src: "{cover}", alt: "{b.article_title}", class: "w-24 h-16 object-cover rounded" }
+                                        }
+                                        div { class: "flex-1",
+                                            h3 { class: "text-lg font-semibold text-gray-900", {b.article_title.clone()} }
+                                            p { class: "text-sm text-gray-600 line-clamp-2", {b.article_excerpt.clone().unwrap_or_default()} }
+                                            if let Some(note) = &b.note {
+                                                if !note.is_empty() {
+                                                    div { class: "mt-2 px-3 py-2 bg-yellow-50 border border-yellow-200 rounded",
+                                                        span { class: "text-xs text-yellow-700 mr-2", "备注" }
+                                                        span { class: "text-sm text-yellow-800", {note.clone()} }
+                                                    }
+                                                }
+                                            }
+                                            div { class: "text-xs text-gray-500 mt-2",
+                                                "{b.author_name} · {b.article_reading_time} min"
+                                            }
+                                        }
+                                        // actions
+                                        div { class: "flex flex-col items-end gap-2",
+                                            // 编辑备注
+                                            button {
+                                                class: "px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-100",
+                                                onclick: {
+                                                    let id = b.id.clone();
+                                                    let current_default = b.note.clone().unwrap_or_default();
+                                                    move |e: dioxus::prelude::Event<dioxus::prelude::MouseData>| {
+                                                        e.prevent_default();
+                                                        e.stop_propagation();
+                                                        let current = current_default.clone();
+                                                        if let Some(win) = web_sys::window() {
+                                                            if let Ok(input) = win.prompt_with_message_and_default("编辑备注", &current) {
+                                                                if let Some(new_note) = input {
+                                                                    let id = id.clone();
+                                                                    let mut list = bookmarks.clone();
+                                                                    spawn(async move {
+                                                                        let note_opt = if new_note.trim().is_empty() { None } else { Some(new_note.clone()) };
+                                                                        if BookmarkService::update_note(&id, note_opt.clone()).await.is_ok() {
+                                                                            // 更新本地状态
+                                                                            if let Some(item) = list.write().iter_mut().find(|it| it.id == id) {
+                                                                                item.note = note_opt;
+                                                                            }
+                                                                        }
+                                                                    });
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                "编辑备注"
+                                            }
+                                            // 移除
+                                            button {
+                                                class: "px-3 py-1 text-sm border border-red-300 text-red-600 rounded hover:bg-red-50",
+                                                onclick: {
+                                                    let id = b.id.clone();
+                                                    move |e: dioxus::prelude::Event<dioxus::prelude::MouseData>| {
+                                                        e.prevent_default();
+                                                        e.stop_propagation();
+                                                        let id = id.clone();
+                                                        let mut list = bookmarks.clone();
+                                                        spawn(async move {
+                                                            if BookmarkService::delete(&id).await.is_ok() {
+                                                                list.write().retain(|it| it.id != id);
+                                                            }
+                                                        });
+                                                    }
+                                                },
+                                                "移除"
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

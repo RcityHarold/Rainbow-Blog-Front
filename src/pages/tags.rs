@@ -12,7 +12,6 @@ use crate::{
 pub fn TagsPage() -> Element {
     let mut tags = use_signal(|| Vec::<Tag>::new());
     let mut loading = use_signal(|| true);
-    let mut active_category = use_signal(|| "all");
     
     // 加载所有标签
     use_effect(move || {
@@ -27,18 +26,7 @@ pub fn TagsPage() -> Element {
         });
     });
     
-    // 按类别筛选标签
-    let filtered_tags = use_memo(move || {
-        let category = active_category();
-        let all_tags = tags();
-        if category == "all" {
-            all_tags
-        } else {
-            all_tags.into_iter()
-                .filter(|tag| tag.category.as_ref().map(|c| c == &category).unwrap_or(false))
-                .collect()
-        }
-    });
+    // 仅显示后端返回的标签（不做前端自定义分组筛选）
     
     rsx! {
         div {
@@ -77,55 +65,7 @@ pub fn TagsPage() -> Element {
                     }
                 }
                 
-                // 类别筛选
-                div {
-                    class: "mb-8 flex flex-wrap gap-2",
-                    button {
-                        class: if active_category() == "all" {
-                            "px-4 py-2 bg-gray-900 text-white rounded-full"
-                        } else {
-                            "px-4 py-2 bg-gray-100 text-gray-700 rounded-full hover:bg-gray-200"
-                        },
-                        onclick: move |_| active_category.set("all"),
-                        "全部"
-                    }
-                    button {
-                        class: if active_category() == "technology" {
-                            "px-4 py-2 bg-gray-900 text-white rounded-full"
-                        } else {
-                            "px-4 py-2 bg-gray-100 text-gray-700 rounded-full hover:bg-gray-200"
-                        },
-                        onclick: move |_| active_category.set("technology"),
-                        "技术"
-                    }
-                    button {
-                        class: if active_category() == "design" {
-                            "px-4 py-2 bg-gray-900 text-white rounded-full"
-                        } else {
-                            "px-4 py-2 bg-gray-100 text-gray-700 rounded-full hover:bg-gray-200"
-                        },
-                        onclick: move |_| active_category.set("design"),
-                        "设计"
-                    }
-                    button {
-                        class: if active_category() == "business" {
-                            "px-4 py-2 bg-gray-900 text-white rounded-full"
-                        } else {
-                            "px-4 py-2 bg-gray-100 text-gray-700 rounded-full hover:bg-gray-200"
-                        },
-                        onclick: move |_| active_category.set("business"),
-                        "商业"
-                    }
-                    button {
-                        class: if active_category() == "culture" {
-                            "px-4 py-2 bg-gray-900 text-white rounded-full"
-                        } else {
-                            "px-4 py-2 bg-gray-100 text-gray-700 rounded-full hover:bg-gray-200"
-                        },
-                        onclick: move |_| active_category.set("culture"),
-                        "文化"
-                    }
-                }
+                // 取消前端硬编码的一级标签，只展示后端返回数据
                 
                 // 标签网格
                 if loading() {
@@ -138,7 +78,7 @@ pub fn TagsPage() -> Element {
                 } else {
                     div {
                         class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6",
-                        for tag in filtered_tags.read().clone() {
+                        for tag in tags() {
                             TagCard { tag }
                         }
                     }

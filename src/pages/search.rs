@@ -131,6 +131,11 @@ pub fn SearchPage() -> Element {
                             "Rainbow Blog"
                         }
                         
+                        // 右侧链接
+                        div { class: "flex items-center gap-4",
+                            Link { to: Route::Publications {}, class: "text-sm text-gray-600 hover:text-gray-900", "出版物" }
+                            Link { to: Route::Home {}, class: "text-sm text-gray-600 hover:text-gray-900", "首页" }
+                        }
                         // 搜索框
                         div {
                             class: "flex-1 max-w-2xl mx-8 relative",

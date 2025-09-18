@@ -96,29 +96,31 @@ impl ApiClient {
             #[cfg(debug_assertions)]
             web_sys::console::log_1(&format!("API Response: {}", text).into());
             
-            // Try to parse as wrapped response first
-            match serde_json::from_str::<ApiResponseWrapper<T>>(&text) {
-                Ok(wrapped) => {
-                    if wrapped.success {
-                        Ok(wrapped.data)
-                    } else {
-                        Err(ApiError {
-                            message: "API returned success=false".to_string(),
-                            status: status.as_u16(),
-                        })
+            // Try wrapped first: { success, data }
+            if let Ok(wrapped) = serde_json::from_str::<ApiResponseWrapper<T>>(&text) {
+                if wrapped.success { return Ok(wrapped.data); }
+                return Err(ApiError { message: "API returned success=false".to_string(), status: status.as_u16() });
+            }
+
+            // Fallback 1: direct parse as T
+            if let Ok(direct) = serde_json::from_str::<T>(&text) {
+                return Ok(direct);
+            }
+
+            // Fallback 2: parse as Value and then extract `data` into T
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) {
+                if let Some(data) = val.get("data") {
+                    if let Ok(extracted) = serde_json::from_value::<T>(data.clone()) {
+                        return Ok(extracted);
                     }
                 }
-                Err(e) => {
-                    #[cfg(debug_assertions)]
-                    web_sys::console::error_1(&format!("Failed to parse wrapped response: {}", e).into());
-                    
-                    // If wrapped parsing fails, try direct parsing (for backward compatibility)
-                    serde_json::from_str::<T>(&text).map_err(|e| ApiError {
-                        message: format!("Failed to parse response: {}", e),
-                        status: status.as_u16(),
-                    })
-                }
             }
+
+            // If all fallbacks fail, return detailed error
+            Err(ApiError {
+                message: format!("Failed to parse response as wrapped, direct, or data-extracted type"),
+                status: status.as_u16(),
+            })
         } else {
             let error_msg = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
             Err(ApiError {

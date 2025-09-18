@@ -9,3 +9,4 @@ pub mod highlight;
 pub mod publication;
 pub mod domain;
 pub mod subscription;
+pub mod bookmark;

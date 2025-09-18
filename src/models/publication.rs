@@ -13,13 +13,15 @@ pub struct Publication {
     pub header_image_url: Option<String>,
     pub domain: Option<String>,
     pub social_links: Option<SocialLinks>,
+    #[serde(default)]
     pub categories: Vec<String>,
     pub is_verified: bool,
     pub member_count: i32,
     pub article_count: i32,
     pub follower_count: i32,
     pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    #[serde(default)]
+    pub updated_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

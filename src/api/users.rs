@@ -1,7 +1,7 @@
 use super::client::{ApiClient, ApiResult};
 use crate::models::{
     user::{UserProfileResponse, UserStats, UpdateProfileRequest, UserListResponse},
-    article::ArticleListResponse,
+    article::{ArticleListResponse, Article, Author, Pagination},
 };
 use once_cell::sync::Lazy;
 use serde::{Serialize, Deserialize};
@@ -57,7 +57,53 @@ impl UserService {
             url = format!("{}?{}", url, query_params.join("&"));
         }
         
-        API_CLIENT.get(&url).await
+        // 解析为原始列表，再转换为前端 ArticleListResponse
+        let raw: crate::api::articles::RawArticleListResponse = API_CLIENT.get(&url).await?;
+        let articles: Vec<Article> = raw.articles.into_iter().map(|raw| Article {
+            id: raw.id,
+            title: raw.title,
+            subtitle: raw.subtitle,
+            slug: raw.slug,
+            content: String::new(),
+            content_html: String::new(),
+            excerpt: raw.excerpt,
+            cover_image_url: raw.cover_image_url,
+            author: Author {
+                id: raw.author.id,
+                username: raw.author.username,
+                display_name: raw.author.display_name,
+                avatar_url: raw.author.avatar_url,
+                is_verified: raw.author.is_verified,
+            },
+            publication: raw.publication.map(|p| crate::models::article::Publication {
+                id: p.id,
+                name: p.name,
+                slug: p.slug,
+                logo_url: p.logo_url,
+            }),
+            series: None,
+            tags: raw.tags.into_iter().map(|t| crate::models::article::Tag { id: t.id, name: t.name, slug: t.slug }).collect(),
+            status: raw.status,
+            is_paid_content: raw.is_paid_content,
+            is_featured: raw.is_featured,
+            reading_time: raw.reading_time,
+            word_count: 0,
+            view_count: raw.view_count,
+            clap_count: raw.clap_count,
+            comment_count: raw.comment_count,
+            bookmark_count: 0,
+            share_count: 0,
+            seo_title: None,
+            seo_description: None,
+            seo_keywords: vec![],
+            created_at: raw.created_at,
+            updated_at: raw.created_at,
+            published_at: raw.published_at,
+            is_bookmarked: None,
+            is_clapped: None,
+            user_clap_count: None,
+        }).collect();
+        Ok(ArticleListResponse { articles, pagination: raw.pagination })
     }
     
     // 通过用户ID获取用户文章
@@ -80,7 +126,52 @@ impl UserService {
             url = format!("{}?{}", url, query_params.join("&"));
         }
         
-        API_CLIENT.get(&url).await
+        let raw: crate::api::articles::RawArticleListResponse = API_CLIENT.get(&url).await?;
+        let articles: Vec<Article> = raw.articles.into_iter().map(|raw| Article {
+            id: raw.id,
+            title: raw.title,
+            subtitle: raw.subtitle,
+            slug: raw.slug,
+            content: String::new(),
+            content_html: String::new(),
+            excerpt: raw.excerpt,
+            cover_image_url: raw.cover_image_url,
+            author: Author {
+                id: raw.author.id,
+                username: raw.author.username,
+                display_name: raw.author.display_name,
+                avatar_url: raw.author.avatar_url,
+                is_verified: raw.author.is_verified,
+            },
+            publication: raw.publication.map(|p| crate::models::article::Publication {
+                id: p.id,
+                name: p.name,
+                slug: p.slug,
+                logo_url: p.logo_url,
+            }),
+            series: None,
+            tags: raw.tags.into_iter().map(|t| crate::models::article::Tag { id: t.id, name: t.name, slug: t.slug }).collect(),
+            status: raw.status,
+            is_paid_content: raw.is_paid_content,
+            is_featured: raw.is_featured,
+            reading_time: raw.reading_time,
+            word_count: 0,
+            view_count: raw.view_count,
+            clap_count: raw.clap_count,
+            comment_count: raw.comment_count,
+            bookmark_count: 0,
+            share_count: 0,
+            seo_title: None,
+            seo_description: None,
+            seo_keywords: vec![],
+            created_at: raw.created_at,
+            updated_at: raw.created_at,
+            published_at: raw.published_at,
+            is_bookmarked: None,
+            is_clapped: None,
+            user_clap_count: None,
+        }).collect();
+        Ok(ArticleListResponse { articles, pagination: raw.pagination })
     }
     
     pub async fn get_current_user_profile() -> ApiResult<UserProfileResponse> {

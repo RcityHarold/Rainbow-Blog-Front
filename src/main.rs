@@ -11,6 +11,7 @@ mod pages;
 use components::*;
 use hooks::*;
 use pages::*;
+use pages::create_publication::CreatePublicationPage;
 
 fn main() {
     // 初始化控制台错误处理
@@ -214,12 +215,8 @@ fn Publications() -> Element {
 #[component]
 fn CreatePublication() -> Element {
     rsx! {
-        div {
-            class: "min-h-screen flex items-center justify-center",
-            p {
-                class: "text-gray-500",
-                "创建出版物功能即将推出"
-            }
+        ProtectedRoute { 
+            CreatePublicationPage {}
         }
     }
 }

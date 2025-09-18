@@ -15,12 +15,15 @@ pub fn DomainManagementPage(publication_id: String) -> Element {
     let mut show_add_modal = use_signal(|| false);
     let mut domain_type = use_signal(|| "subdomain".to_string());
     let mut error = use_signal(|| None::<String>);
+    let mut info = use_signal(|| None::<String>);
     
     // 表单状态
     let mut subdomain_input = use_signal(|| String::new());
     let mut custom_domain_input = use_signal(|| String::new());
     let mut is_primary = use_signal(|| false);
     let mut creating = use_signal(|| false);
+    // 平台域名后缀（动态从当前访问域名获取）
+    let mut platform_host = use_signal(|| String::from("platform.com"));
     
     let auth = use_auth();
     
@@ -57,7 +60,17 @@ pub fn DomainManagementPage(publication_id: String) -> Element {
     // 初始加载
     use_effect({
         let load_domains = load_domains.clone();
+        let mut platform_host = platform_host.clone();
         move || {
+            // 动态获取当前访问的前端域名（hostname，不含端口）
+            if let Some(win) = web_sys::window() {
+                if let Ok(hostname) = win.location().hostname() {
+                    let host = hostname.trim().to_string();
+                    if !host.is_empty() {
+                        platform_host.set(host);
+                    }
+                }
+            }
             load_domains();
         }
     });
@@ -82,9 +95,11 @@ pub fn DomainManagementPage(publication_id: String) -> Element {
         error.set(None);
         
         let pub_id = publication_id.clone();
+        let platform_host_cur = platform_host.clone();
         
         spawn(async move {
-            let result = if domain_type() == "subdomain" {
+            let is_sub = domain_type() == "subdomain";
+            let result = if is_sub {
                 let request = CreateSubdomainRequest {
                     subdomain: subdomain_input(),
                     is_primary: is_primary(),
@@ -104,6 +119,16 @@ pub fn DomainManagementPage(publication_id: String) -> Element {
                     subdomain_input.set(String::new());
                     custom_domain_input.set(String::new());
                     is_primary.set(false);
+                    // 下一步提示
+                    if is_sub {
+                        let host = platform_host_cur();
+                        info.set(Some(format!(
+                            "子域名已创建完成，可直接访问。例如: https://<你的子域名>.{}。若已开启自动SSL，证书将在数分钟内自动生效。",
+                            host
+                        )));
+                    } else {
+                        info.set(Some("自定义域名已创建。下一步：请前往您的域名服务商的 DNS 控制台，按系统提示添加验证记录（TXT/CNAME）。完成后返回本页点击对应域名卡片上的“重新验证”。验证通过后，如启用自动SSL，将自动申请证书。".into()));
+                    }
                     load_domains();
                 }
                 Err(e) => {
@@ -157,6 +182,14 @@ pub fn DomainManagementPage(publication_id: String) -> Element {
                         class: "px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700",
                         onclick: move |_| show_add_modal.set(true),
                         "添加域名"
+                    }
+                }
+
+                // 信息提示（下一步指引）
+                if let Some(msg) = info() {
+                    div {
+                        class: "mb-6 p-4 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300",
+                        {msg}
                     }
                 }
                 
@@ -242,6 +275,21 @@ pub fn DomainManagementPage(publication_id: String) -> Element {
                                         }
                                         });
                                     }
+                                },
+                                on_reverify: {
+                                    let pub_id = publication_id.clone();
+                                    let mut domains = domains.clone();
+                                    move |domain_id: String| {
+                                        let pub_id = pub_id.clone();
+                                        let mut domains = domains.clone();
+                                        spawn(async move {
+                                            if let Ok(_) = DomainService::reverify_domain(&domain_id).await {
+                                                if let Ok(domain_list) = DomainService::get_publication_domains(&pub_id).await {
+                                                    domains.set(domain_list);
+                                                }
+                                            }
+                                        });
+                                    }
                                 }
                             }
                         }
@@ -317,14 +365,13 @@ pub fn DomainManagementPage(publication_id: String) -> Element {
                                         oninput: move |e| subdomain_input.set(e.value()),
                                         class: "flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-l-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                                     }
-                                    span {
-                                        class: "px-3 py-2 bg-gray-100 dark:bg-gray-700 border border-l-0 border-gray-300 dark:border-gray-600 rounded-r-lg text-sm",
-                                        ".platform.com"
+                                    span { class: "px-3 py-2 bg-gray-100 dark:bg-gray-700 border border-l-0 border-gray-300 dark:border-gray-600 rounded-r-lg text-sm",
+                                        { format!(".{}", platform_host()) }
                                     }
                                 }
                                 p {
                                     class: "text-xs text-gray-500 mt-1",
-                                    "3-63个字符，仅限字母数字和连字符"
+                                    "3-63个字符，仅限字母数字和连字符。创建后可直接使用，无需在外部DNS配置记录。"
                                 }
                             }
                         } else {
@@ -341,9 +388,26 @@ pub fn DomainManagementPage(publication_id: String) -> Element {
                                     oninput: move |e| custom_domain_input.set(e.value()),
                                     class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 }
-                                p {
-                                    class: "text-xs text-gray-500 mt-1",
-                                    "需要DNS验证，请确保您拥有该域名"
+                                // 即时展示 DNS 配置说明（创建前提示）
+                                div {
+                                    class: "mt-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-xs space-y-2",
+                                    p { class: "font-medium", "配置说明（创建前）" }
+                                    p { "在您的域名服务商 DNS 控制台，添加如下记录：" }
+                                    div { class: "grid grid-cols-1 md:grid-cols-2 gap-3",
+                                        div {
+                                            class: "p-2 rounded bg-white/60 dark:bg-gray-800/50 border border-amber-200 dark:border-amber-700",
+                                            div { class: "font-semibold", "TXT（所有权验证）" }
+                                            div { class: "mt-1", "名称/主机名：_rainbow-verify.<你的自定义域>" }
+                                            div { "值：系统创建后会生成唯一令牌（如 rainbow-verify-xxxxxxxx），复制该值填入" }
+                                        }
+                                        div {
+                                            class: "p-2 rounded bg-white/60 dark:bg-gray-800/50 border border-amber-200 dark:border-amber-700",
+                                            div { class: "font-semibold", "CNAME（流量指向平台）" }
+                                            div { class: "mt-1", "名称/主机名：<你的自定义域>" }
+                                            div { "值：" {format!("domains.{}", platform_host())} }
+                                        }
+                                    }
+                                    p { "添加并生效后，返回本页在对应域名卡片点击“重新验证”。验证通过后（通常 5–30 分钟），如开启自动SSL，将自动申请证书。" }
                                 }
                             }
                         }
@@ -401,6 +465,7 @@ fn DomainCard(
     domain: PublicationDomain,
     on_delete: EventHandler<String>,
     on_set_primary: EventHandler<String>,
+    on_reverify: EventHandler<String>,
 ) -> Element {
     let mut show_dns_modal = use_signal(|| false);
     let mut verification_records = use_signal(|| Vec::<DNSRecord>::new());
@@ -479,7 +544,7 @@ fn DomainCard(
                     }
                     
                     // 验证提示
-                    if matches!(domain.status, DomainStatus::Pending | DomainStatus::Verifying) && domain.custom_domain.is_some() {
+                    if matches!(domain.status, DomainStatus::Pending | DomainStatus::Verifying | DomainStatus::Failed) && domain.custom_domain.is_some() {
                         div {
                             class: "mt-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg",
                             p {
@@ -502,6 +567,15 @@ fn DomainCard(
                                     }
                                 },
                                 "查看DNS配置说明"
+                            }
+                            // 重新验证按钮
+                            button {
+                                class: "mt-2 ml-4 text-sm text-blue-600 hover:text-blue-800 underline",
+                                onclick: {
+                                    let did = domain.id.clone();
+                                    move |_| on_reverify.call(did.clone())
+                                },
+                                "重新验证"
                             }
                         }
                     }

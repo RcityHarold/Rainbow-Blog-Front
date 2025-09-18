@@ -11,6 +11,7 @@ pub mod series;
 pub mod series_detail;
 pub mod publications;
 pub mod publication_detail;
+pub mod create_publication;
 pub mod domain_management;
 pub mod subscription_plans;
 pub mod my_subscriptions;

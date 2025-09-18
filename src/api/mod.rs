@@ -12,3 +12,4 @@ pub mod recommendations;
 pub mod publications;
 pub mod domains;
 pub mod subscriptions;
+pub mod bookmarks;

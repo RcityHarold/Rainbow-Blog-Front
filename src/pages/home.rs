@@ -163,6 +163,12 @@ pub fn HomePage() -> Element {
                         // 右侧操作按钮
                         div {
                             class: "flex items-center space-x-4",
+                            // 出版物入口
+                            Link {
+                                to: Route::Publications {},
+                                class: "text-sm text-gray-700 hover:text-gray-900",
+                                "出版物"
+                            }
                             if auth.read().is_authenticated {
                                 Link {
                                     to: Route::Write {},

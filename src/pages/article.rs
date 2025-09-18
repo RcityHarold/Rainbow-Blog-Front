@@ -129,6 +129,12 @@ pub fn ArticlePage(slug: String) -> Element {
                         
                         div {
                             class: "flex items-center space-x-4",
+                            // 出版物入口
+                            Link {
+                                to: Route::Publications {},
+                                class: "text-sm text-gray-700 hover:text-gray-900",
+                                "出版物"
+                            }
                             if auth.read().is_authenticated {
                                 button {
                                     class: "px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-full hover:bg-gray-800",
